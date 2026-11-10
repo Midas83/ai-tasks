@@ -63,7 +63,7 @@
 <main>
   <section id="login" hidden>
     <h1>AI Tasks</h1>
-    <p class="meta">Sign in with a one-time email link.</p>
+    <p class="meta">Sign in with a one-time email link. Access is by invitation only.</p>
     <form id="loginForm">
       <input type="email" id="email" placeholder="you@example.com" autocomplete="email" required>
       <button class="primary" type="submit">Send link</button>
@@ -192,9 +192,12 @@ $("loginForm").addEventListener("submit", async (e) => {
   $("msg").textContent = "Sending…";
   const { error } = await sb.auth.signInWithOtp({
     email: $("email").value.trim(),
-    options: { emailRedirectTo: location.origin + location.pathname },
+    // Never create accounts from this page; users are provisioned in Supabase.
+    options: { emailRedirectTo: location.origin + location.pathname, shouldCreateUser: false },
   });
-  $("msg").textContent = error ? error.message : "Check your email for the sign-in link.";
+  $("msg").textContent = error
+    ? (/signups? not allowed|not found/i.test(error.message) ? "This email has not been given access." : error.message)
+    : "If this email has access, a sign-in link is on its way.";
 });
 $("signout").addEventListener("click", () => sb.auth.signOut());
 $("fSource").addEventListener("change", render);
