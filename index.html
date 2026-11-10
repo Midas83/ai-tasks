@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="AI Tasks">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg">
+<title>AI Tasks</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #14171c; --muted: #646b78; --line: #e2e5ea;
+    --running: #2563eb; --needs: #b45309; --done: #15803d; --failed: #b91c1c; --stale: #6b7280;
+    --accent: #14171c; --accent-text: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --card: #181b21; --text: #e8eaee; --muted: #969dab; --line: #2a2e37;
+      --running: #6ea0ff; --needs: #f0a94b; --done: #4cc27a; --failed: #f17272; --stale: #8a909c;
+      --accent: #e8eaee; --accent-text: #0f1115;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 16px 16px calc(32px + env(safe-area-inset-bottom)); }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 24px 0 8px; }
+  button, select, input { font: inherit; color: inherit; }
+  button { cursor: pointer; border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 8px 12px; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  select, input[type=email] { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 8px 10px; min-width: 0; }
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; }
+  .filters select { flex: 1 1 140px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--stale);
+    border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; }
+  .card.running { border-left-color: var(--running); } .card.needs_input { border-left-color: var(--needs); }
+  .card.done { border-left-color: var(--done); } .card.failed { border-left-color: var(--failed); }
+  .card.stale { border-left-color: var(--stale); }
+  .top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+  .title { font-weight: 600; overflow-wrap: anywhere; }
+  .badge { font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .running .badge { color: var(--running); } .needs_input .badge { color: var(--needs); }
+  .done .badge { color: var(--done); } .failed .badge { color: var(--failed); } .stale .badge { color: var(--stale); }
+  .meta { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .summary { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px;
+    display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+  .card.open .summary { display: block; }
+  .empty { color: var(--muted); padding: 8px 2px; }
+  #login { max-width: 380px; margin: 18vh auto 0; text-align: center; }
+  #login form { display: flex; gap: 8px; margin-top: 16px; }
+  #login input { flex: 1; }
+  #msg { color: var(--muted); margin-top: 12px; min-height: 1.4em; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--stale); margin-right: 6px; }
+  .dot.live { background: var(--done); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <section id="login" hidden>
+    <h1>AI Tasks</h1>
+    <p class="meta">Sign in with a one-time email link.</p>
+    <form id="loginForm">
+      <input type="email" id="email" placeholder="you@example.com" autocomplete="email" required>
+      <button class="primary" type="submit">Send link</button>
+    </form>
+    <div id="msg"></div>
+  </section>
+
+  <section id="app" hidden>
+    <header>
+      <h1><span class="dot" id="live" title="Live connection"></span>AI Tasks</h1>
+      <button id="signout">Sign out</button>
+    </header>
+    <div class="filters">
+      <select id="fSource" aria-label="Source"><option value="">All sources</option></select>
+      <select id="fAccount" aria-label="Account"><option value="">All accounts</option></select>
+    </div>
+    <div id="notOwner" class="empty" hidden>You are signed in, but this account has not been given access to the dashboard yet.</div>
+    <h2>Needs input</h2><div id="needs"></div>
+    <h2>Active</h2><div id="active"></div>
+    <h2>Recent</h2><div id="recent"></div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+// ---- Configuration (filled in at deploy time; the publishable key is safe to ship) ----
+const SUPABASE_URL = "https://nicvyxcysbbywxhdosrp.supabase.co";
+const SUPABASE_KEY = "sb_publishable_4Dwg-8c0k2HrWC_SoHNUnA_q4Y2flvm";
+const STALE_MINUTES = 60;   // a "running" task with no update for this long is shown as possibly stuck
+const RECENT_LIMIT = 50;
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const $ = (id) => document.getElementById(id);
+let tasks = new Map();
+let channel = null;
+
+const LABEL = { running: "Running", needs_input: "Needs input", done: "Done", failed: "Failed", stale: "No update" };
+
+function ago(iso) {
+  const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return Math.floor(s / 60) + "m ago";
+  if (s < 86400) return Math.floor(s / 3600) + "h ago";
+  return Math.floor(s / 86400) + "d ago";
+}
+
+function view(t) {
+  const stale = t.status === "running" && Date.now() - Date.parse(t.updated_at) > STALE_MINUTES * 60000;
+  return stale ? "stale" : t.status;
+}
+
+function card(t) {
+  const v = view(t);
+  const el = document.createElement("div");
+  el.className = "card " + v;
+  const top = document.createElement("div"); top.className = "top";
+  const title = document.createElement("div"); title.className = "title"; title.textContent = t.title || t.source;
+  const badge = document.createElement("div"); badge.className = "badge"; badge.textContent = LABEL[v];
+  top.append(title, badge);
+  const meta = document.createElement("div"); meta.className = "meta";
+  meta.textContent = [t.source, t.account, t.machine, ago(t.updated_at)].filter(Boolean).join(" · ");
+  el.append(top, meta);
+  if (t.summary) {
+    const s = document.createElement("p"); s.className = "summary"; s.textContent = t.summary;
+    el.append(s);
+    el.addEventListener("click", () => el.classList.toggle("open"));
+  }
+  return el;
+}
+
+function fillSelect(sel, values, first) {
+  const cur = sel.value;
+  sel.replaceChildren(new Option(first, ""), ...values.map((v) => new Option(v, v)));
+  sel.value = values.includes(cur) ? cur : "";
+}
+
+function render() {
+  const all = [...tasks.values()].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at));
+  fillSelect($("fSource"), [...new Set(all.map((t) => t.source))].sort(), "All sources");
+  fillSelect($("fAccount"), [...new Set(all.map((t) => t.account))].sort(), "All accounts");
+  const src = $("fSource").value, acc = $("fAccount").value;
+  const shown = all.filter((t) => (!src || t.source === src) && (!acc || t.account === acc));
+  const groups = {
+    needs: shown.filter((t) => t.status === "needs_input"),
+    active: shown.filter((t) => t.status === "running"),
+    recent: shown.filter((t) => t.status === "done" || t.status === "failed").slice(0, RECENT_LIMIT),
+  };
+  for (const [id, list] of Object.entries(groups)) {
+    const box = $(id);
+    if (list.length) box.replaceChildren(...list.map(card));
+    else { const e = document.createElement("div"); e.className = "empty"; e.textContent = "Nothing here."; box.replaceChildren(e); }
+  }
+  const n = groups.needs.length;
+  document.title = n ? `(${n}) AI Tasks` : "AI Tasks";
+}
+
+async function load() {
+  const { data, error } = await sb.from("ai_tasks").select("*").order("updated_at", { ascending: false }).limit(200);
+  if (error) { console.error(error); return; }
+  tasks = new Map(data.map((t) => [t.id, t]));
+  render();
+}
+
+function subscribe() {
+  if (channel) sb.removeChannel(channel);
+  channel = sb.channel("tasks-feed")
+    .on("postgres_changes", { event: "*", schema: "public", table: "ai_tasks" }, (p) => {
+      if (p.eventType === "DELETE") tasks.delete(p.old.id); else tasks.set(p.new.id, p.new);
+      render();
+    })
+    .subscribe((status) => $("live").classList.toggle("live", status === "SUBSCRIBED"));
+}
+
+async function start(session) {
+  $("login").hidden = !!session;
+  $("app").hidden = !session;
+  if (!session) { if (channel) { sb.removeChannel(channel); channel = null; } return; }
+  const { data: owner } = await sb.from("ai_dashboard_owners").select("user_id").maybeSingle();
+  $("notOwner").hidden = !!owner;
+  await load();
+  subscribe();
+}
+
+$("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("msg").textContent = "Sending…";
+  const { error } = await sb.auth.signInWithOtp({
+    email: $("email").value.trim(),
+    options: { emailRedirectTo: location.origin + location.pathname },
+  });
+  $("msg").textContent = error ? error.message : "Check your email for the sign-in link.";
+});
+$("signout").addEventListener("click", () => sb.auth.signOut());
+$("fSource").addEventListener("change", render);
+$("fAccount").addEventListener("change", render);
+
+let signedIn = null;
+sb.auth.onAuthStateChange((_event, session) => {
+  const now = !!session;
+  if (now === signedIn) return;      // ignore token refreshes
+  signedIn = now;
+  setTimeout(() => start(session), 0); // avoid calling Supabase inside the auth callback
+});
+
+// Refresh relative times and stale flags; reload when the tab comes back to the foreground.
+setInterval(render, 60000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && signedIn) load(); });
+</script>
+</body>
+</html>
